@@ -1,0 +1,339 @@
+Project warehouse_management {
+  database_type: 'PostgreSQL'
+  Note: 'Quan ly kho hang: hang hoa, nhap kho, xuat kho, chuyen kho, kiem ke va so cai ton kho. So luong ton theo don vi co so; chi chung tu POSTED moi anh huong ton kho.'
+}
+
+Enum user_status {
+  ACTIVE
+  INACTIVE
+}
+Enum document_status {
+  DRAFT
+  POSTED
+  VOIDED
+}
+Enum stock_document_type {
+  PURCHASE_RECEIPT
+  MANUAL_OUT
+  OPENING_BALANCE
+  MANUAL_IN
+  SALES_ISSUE
+  SUPPLIER_RETURN
+  CUSTOMER_RETURN
+  WASTE
+  STOCK_COUNT_GAIN
+  STOCK_COUNT_LOSS
+  REVERSAL
+  TRANSFER_OUT
+  TRANSFER_IN
+}
+Enum movement_type {
+  IN
+  OUT
+  REVERSAL
+}
+Enum count_status {
+  DRAFT
+  COUNTING
+  POSTED
+  CANCELLED
+}
+Enum payment_method {
+  CASH
+  BANK_TRANSFER
+  COD
+  OTHER
+}
+Enum supplier_payment_status {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+}
+
+Table branches {
+  id uuid [pk]
+  code varchar(30) [not null, unique]
+  name varchar(150) [not null]
+  address text
+  phone varchar(30)
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+}
+
+Table warehouses {
+  id uuid [pk]
+  branch_id uuid [not null, ref: > branches.id]
+  code varchar(30) [not null, unique]
+  name varchar(150) [not null]
+  is_default boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  Note: 'For MVP initialize one default warehouse. A branch can later have several warehouses.'
+}
+
+Table users {
+  id uuid [pk]
+  full_name varchar(150) [not null]
+  email varchar(255) [not null, unique]
+  password_hash varchar(255) [not null]
+  status user_status [not null, default: 'ACTIVE']
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+}
+Table roles {
+  id uuid [pk]
+  code varchar(60) [not null, unique]
+  name varchar(120) [not null]
+}
+Table permissions {
+  id uuid [pk]
+  code varchar(100) [not null, unique]
+  description varchar(255)
+}
+Table role_permissions {
+  role_id uuid [not null, ref: > roles.id]
+  permission_id uuid [not null, ref: > permissions.id]
+  indexes { (role_id, permission_id) [pk] }
+}
+Table user_roles {
+  id uuid [pk]
+  user_id uuid [not null, ref: > users.id]
+  role_id uuid [not null, ref: > roles.id]
+  branch_id uuid [ref: > branches.id, note: 'NULL = system-wide role; enforce scope in backend']
+  indexes { (user_id, role_id, branch_id) [unique] }
+}
+Table audit_logs {
+  id uuid [pk]
+  actor_id uuid [ref: > users.id]
+  action varchar(100) [not null]
+  entity_type varchar(70) [not null]
+  entity_id uuid
+  payload jsonb
+  created_at timestamptz [not null]
+}
+
+Table units {
+  id uuid [pk]
+  code varchar(20) [not null, unique]
+  name varchar(80) [not null]
+  dimension varchar(30) [not null, note: 'MASS, VOLUME, COUNT; conversions must match dimensions']
+}
+Table product_categories {
+  id uuid [pk]
+  name varchar(100) [not null]
+}
+Table products {
+  id uuid [pk]
+  sku varchar(60) [not null, unique]
+  barcode varchar(100) [unique]
+  name varchar(160) [not null]
+  category_id uuid [ref: > product_categories.id]
+  base_unit_id uuid [not null, ref: > units.id]
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+}
+Table unit_conversions {
+  id uuid [pk]
+  product_id uuid [ref: > products.id, note: 'NULL for universal conversion such as kg to g']
+  from_unit_id uuid [not null, ref: > units.id]
+  to_unit_id uuid [not null, ref: > units.id]
+  factor decimal(18,6) [not null, note: 'quantity_to = quantity_from * factor']
+}
+Table warehouse_product_settings {
+  warehouse_id uuid [not null, ref: > warehouses.id]
+  product_id uuid [not null, ref: > products.id]
+  minimum_stock decimal(18,3) [not null, default: 0]
+  indexes { (warehouse_id, product_id) [pk] }
+}
+Table suppliers {
+  id uuid [pk]
+  code varchar(40) [not null, unique]
+  name varchar(160) [not null]
+  phone varchar(30)
+  address text
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null]
+}
+Table purchase_receipts {
+  id uuid [pk]
+  code varchar(50) [not null, unique]
+  supplier_id uuid [not null, ref: > suppliers.id]
+  warehouse_id uuid [not null, ref: > warehouses.id]
+  status document_status [not null, default: 'DRAFT']
+  total_amount decimal(18,2) [not null, default: 0]
+  payment_status supplier_payment_status [not null, default: 'UNPAID']
+  due_date date
+  note text
+  created_by uuid [not null, ref: > users.id]
+  posted_at timestamptz
+  created_at timestamptz [not null]
+  Note: 'Receipt posts stock independently of supplier payment.'
+}
+Table purchase_receipt_items {
+  id uuid [pk]
+  receipt_id uuid [not null, ref: > purchase_receipts.id]
+  product_id uuid [not null, ref: > products.id]
+  input_unit_id uuid [not null, ref: > units.id]
+  input_quantity decimal(18,3) [not null]
+  conversion_factor decimal(18,6) [not null, note: 'Positive conversion snapshot; base_quantity = input_quantity * conversion_factor']
+  base_quantity decimal(18,3) [not null]
+  unit_price decimal(18,2) [not null, note: 'Per input unit']
+  line_total decimal(18,2) [not null]
+}
+Table supplier_payments {
+  id uuid [pk]
+  purchase_receipt_id uuid [not null, ref: > purchase_receipts.id]
+  method payment_method [not null]
+  amount decimal(18,2) [not null]
+  paid_at timestamptz [not null]
+  created_by uuid [not null, ref: > users.id]
+  note text
+}
+
+Table stock_balances {
+  warehouse_id uuid [not null, ref: > warehouses.id]
+  product_id uuid [not null, ref: > products.id]
+  quantity decimal(18,3) [not null, default: 0]
+  average_unit_cost decimal(18,6) [not null, default: 0]
+  version int [not null, default: 0]
+  updated_at timestamptz [not null]
+  indexes { (warehouse_id, product_id) [pk] }
+}
+Table stock_documents {
+  id uuid [pk]
+  code varchar(50) [not null, unique]
+  warehouse_id uuid [not null, ref: > warehouses.id]
+  type stock_document_type [not null]
+  status document_status [not null, default: 'DRAFT']
+  purchase_receipt_id uuid [unique, ref: > purchase_receipts.id]
+  stock_issue_id uuid [unique, ref: > stock_issues.id]
+  stock_transfer_id uuid [ref: > stock_transfers.id]
+  stock_count_id uuid [ref: > stock_counts.id]
+  idempotency_key varchar(100) [not null, unique]
+  reversal_of_id uuid [unique, ref: > stock_documents.id]
+  note text
+  created_by uuid [not null, ref: > users.id]
+  posted_by uuid [ref: > users.id]
+  created_at timestamptz [not null]
+  posted_at timestamptz
+  Note: 'Posting generates stock_movements atomically with balance updates. External operation idempotency enforced by backend.'
+}
+Table stock_document_items {
+  id uuid [pk]
+  stock_document_id uuid [not null, ref: > stock_documents.id]
+  product_id uuid [not null, ref: > products.id]
+  quantity decimal(18,3) [not null, note: 'Always positive; movement direction comes from document type']
+  unit_cost decimal(18,6)
+}
+Table stock_movements {
+  id uuid [pk]
+  warehouse_id uuid [not null, ref: > warehouses.id]
+  product_id uuid [not null, ref: > products.id]
+  stock_document_item_id uuid [not null, unique, ref: > stock_document_items.id]
+  movement_type movement_type [not null]
+  quantity_delta decimal(18,3) [not null, note: 'Signed quantity: positive in, negative out']
+  unit_cost decimal(18,6) [not null]
+  original_movement_id uuid [ref: > stock_movements.id]
+  created_at timestamptz [not null]
+  indexes { (warehouse_id, product_id, created_at) }
+  Note: 'Immutable movement ledger; corrections use reversal movements.'
+}
+Table stock_counts {
+  id uuid [pk]
+  code varchar(50) [not null, unique]
+  warehouse_id uuid [not null, ref: > warehouses.id]
+  status count_status [not null, default: 'DRAFT']
+  created_by uuid [not null, ref: > users.id]
+  approved_by uuid [ref: > users.id]
+  snapshot_at timestamptz
+  created_at timestamptz [not null]
+  posted_at timestamptz
+}
+Table stock_count_items {
+  id uuid [pk]
+  stock_count_id uuid [not null, ref: > stock_counts.id]
+  product_id uuid [not null, ref: > products.id]
+  expected_quantity decimal(18,3) [not null]
+  counted_quantity decimal(18,3) [note: 'NULL = not counted yet; required before posting']
+  variance_quantity decimal(18,3) [note: 'counted_quantity - expected_quantity; calculated when counted']
+  indexes { (stock_count_id, product_id) [unique] }
+}
+
+
+Enum stock_issue_type {
+  MANUAL_OUT
+  SALES_ISSUE
+  SUPPLIER_RETURN
+  WASTE
+}
+
+Table stock_issues {
+  id uuid [pk]
+  code varchar(50) [not null, unique]
+  warehouse_id uuid [not null, ref: > warehouses.id]
+  type stock_issue_type [not null, default: 'MANUAL_OUT']
+  supplier_id uuid [ref: > suppliers.id, note: 'Required for SUPPLIER_RETURN']
+  recipient_name varchar(160)
+  external_reference varchar(100)
+  status document_status [not null, default: 'DRAFT']
+  reason text [not null]
+  created_by uuid [not null, ref: > users.id]
+  posted_by uuid [ref: > users.id]
+  created_at timestamptz [not null]
+  posted_at timestamptz
+}
+
+Table stock_issue_items {
+  id uuid [pk]
+  stock_issue_id uuid [not null, ref: > stock_issues.id]
+  product_id uuid [not null, ref: > products.id]
+  input_unit_id uuid [not null, ref: > units.id]
+  input_quantity decimal(18,3) [not null]
+  conversion_factor decimal(18,6) [not null]
+  base_quantity decimal(18,3) [not null]
+  note text
+}
+
+Table stock_transfers {
+  id uuid [pk]
+  code varchar(50) [not null, unique]
+  source_warehouse_id uuid [not null, ref: > warehouses.id]
+  destination_warehouse_id uuid [not null, ref: > warehouses.id]
+  status document_status [not null, default: 'DRAFT']
+  note text
+  created_by uuid [not null, ref: > users.id]
+  posted_by uuid [ref: > users.id]
+  created_at timestamptz [not null]
+  posted_at timestamptz
+  Note: 'Immediate transfer only. Different source and destination; post TRANSFER_OUT and TRANSFER_IN atomically with identical products, quantities and costs. In-transit logistics is outside MVP.'
+}
+
+Table stock_transfer_items {
+  id uuid [pk]
+  stock_transfer_id uuid [not null, ref: > stock_transfers.id]
+  product_id uuid [not null, ref: > products.id]
+  quantity decimal(18,3) [not null, note: 'Positive quantity in product base unit']
+  indexes { (stock_transfer_id, product_id) [unique] }
+}
+
+// Implementation rules (enforce using PostgreSQL constraints, transactions and backend):
+// 1. Quantities and conversion factors > 0; prices, minimum stock and monetary amounts >= 0.
+// 2. stock_documents is the sole stock posting gateway; receipts/issues/transfers/counts do not update balances directly.
+// 3. Require exactly one compatible source link for derived documents; manual/opening/return documents may be standalone.
+// 4. One posted document per receipt/issue; one IN and one OUT per transfer; at most one GAIN and one LOSS per count.
+//    Enforce partial unique indexes on (stock_transfer_id, type) and (stock_count_id, type).
+// 5. Posting is idempotent and atomic: lock stock_balances, reject negative stock, write immutable movements and update balances.
+// 6. POSTED documents/items cannot be edited/deleted. VOIDED posted documents require a posted reversal.
+//    Reversals negate each original movement quantity and value once; original_movement_id must be unique when non-NULL.
+// 7. Unit conversions must be positive, unambiguous, dimension-compatible, and resolve to the product base unit.
+//    Enforce separate unique indexes for global and product-specific conversions; packaging conversions are product-specific.
+// 8. Moving weighted average valuation: inbound adds value; outbound uses current average cost; transfers preserve value.
+//    A reversal must also restore original value; recompute average cost from resulting quantity/value within the transaction.
+// 9. Freeze warehouse posting from count snapshot until posting/cancellation; every counted_quantity must be filled before posting.
+//    Post variance only, not counted quantity; the ledger and balance must reconcile.
+// 10. Enforce one default warehouse per branch and role-scope uniqueness even when branch_id is NULL.
+// 11. Procurement payment status is independent of stock posting; total payments must not exceed receipt amount.
+// 12. This ERD models inventory by product/warehouse; bins, lots, serial numbers and expiry are outside MVP.

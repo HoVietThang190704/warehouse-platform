@@ -1,0 +1,9 @@
+[submodule "apps/api"]
+	path = apps/api
+	url = https://github.com/HoVietThang190704/warehouse-api.git
+[submodule "apps/web"]
+	path = apps/web
+	url = https://github.com/HoVietThang190704/warehouse-web.git
+[submodule "apps/mobile"]
+	path = apps/mobile
+	url = https://github.com/HoVietThang190704/warehouse-mobile.git
