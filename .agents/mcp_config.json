@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "office": {
+      "command": "C:\\Program Files\\nodejs\\node.exe",
+      "args": [
+        "C:\\Users\\ROG\\AppData\\Local\\Programs\\Agent Office 3D\\resources\\app\\dist\\mcp\\office-mcp.mjs"
+      ],
+      "env": {
+        "OFFICE_URL": "http://127.0.0.1:54174",
+        "AGENT_ID": "studio",
+        "TASK_ID": "st_syn_d603bee8",
+        "LOCALE": "vi"
+      }
+    }
+  }
+}
